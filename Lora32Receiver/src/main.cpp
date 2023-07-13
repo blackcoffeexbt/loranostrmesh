@@ -6,8 +6,8 @@
 #include <NostrEvent.h>
 #include <NostrRelayManager.h>
 
-const char* ssid     = "Maddox Guest"; // wifi SSID here
-const char* password = "MadGuest1"; // wifi password here
+const char* ssid     = "PLUSNET-MWC9Q2"; // wifi SSID here
+const char* password = "4NyMeXtNcQ6rqP"; // wifi password here
 
 NostrEvent nostr;
 NostrRelayManager nostrRelayManager;
@@ -22,6 +22,9 @@ const int   daylightOffset_sec = 3600;
 
 char const *nsecHex = "bdd19cecd942ed8964c2e0ddc92d5e09838d3a09ebb230d974868be00886704b";
 char const *npubHex = "d0bfc94bd4324f7df2a7601c4177209828047c4d3904d64009a3c67fb5d5e7ca";
+
+long bootMillis = 0;
+long bootTimestamp = 0;
 
 unsigned long getUnixTimestamp() {
   time_t now;
@@ -69,6 +72,10 @@ void setup()
 
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
+    bootMillis = millis();
+    bootTimestamp = getUnixTimestamp();
+
+
     const char *const relays[] = {
         "relay.damus.io",
         "nostr.mom",
@@ -106,9 +113,46 @@ String getSecsSinceLastReceive()
     return String(diff / 1000);
 }
 
+/** current timestamp is boot timestamp plus seconds delta of bootmillis and current millis */
+long getTimestampUsingBootMillis()
+{
+    long now = millis();
+    long diff = now - bootMillis;
+    return bootTimestamp + (diff / 1000);
+}
+
+long lastBroadcastTime = 0;
+
+/** broadcast timestamp millis every 10 seconds */
+void broadcastTimestampOnLoRa()
+{
+    long now = millis();
+    long diff = now - lastBroadcastTime;
+    if (diff > 10000) {
+        lastBroadcastTime = now;
+        long timestamp = getTimestampUsingBootMillis();
+        String timestampStr = "TIMESTAMP|" + String(timestamp);
+        Serial.println("Broadcasting " + timestampStr);
+        LoRa.beginPacket();
+        LoRa.print(timestampStr);
+        LoRa.endPacket();
+
+#ifdef HAS_DISPLAY
+        if (u8g2) {
+            u8g2->clearBuffer();
+            char buf[256];
+            u8g2->drawStr(0, 10, "Timestamp broadcast");
+            u8g2->drawStr(0, 20, timestampStr.c_str());
+            u8g2->sendBuffer();
+        }
+#endif
+    }
+}
+
 String lastTimeUpdate = "";
 void loop()
 {
+    broadcastTimestampOnLoRa();
     // try to parse packet
     int packetSize = LoRa.parsePacket();
     if (packetSize) {
@@ -118,9 +162,38 @@ void loop()
 
         String recv = "";
         // read packet
+        String completeMessage = "";
+        String currentPacket = "";
+        String endOfPacketMarker = "<EOP>";
+
         while (LoRa.available()) {
-            recv += (char)LoRa.read();
+            char incoming = (char)LoRa.read();
+            if (incoming == '<') { // start of the end of packet marker
+                currentPacket += incoming;
+
+                // read the next 4 characters
+                for (int i = 0; i < 4; i++) {
+                if (LoRa.available()) {
+                    currentPacket += (char)LoRa.read();
+                }
+                }
+
+                // check if we've read the end of packet marker
+                if (currentPacket.endsWith(endOfPacketMarker)) {
+                // remove the end of packet marker
+                currentPacket.replace(endOfPacketMarker, "");
+                completeMessage += currentPacket;
+                currentPacket = "";
+                }
+            } else {
+                currentPacket += incoming;
+            }
         }
+
+        // Now `completeMessage` contains the full message
+        Serial.println(completeMessage);
+
+        recv = completeMessage;
 
         Serial.println(recv);
 
@@ -128,11 +201,10 @@ void loop()
         Serial.print("' with RSSI ");
         Serial.println(LoRa.packetRssi());
 
-
-        long timestamp = getUnixTimestamp();
-        String note = nostr.getNote(nsecHex, npubHex, timestamp, recv.c_str());
-        Serial.println("Sending not to nostr" + note);
-        nostrRelayManager.enqueueMessage(note.c_str());
+        // long timestamp = getUnixTimestamp();
+        // String note = nostr.getNote(nsecHex, npubHex, timestamp, recv.c_str());
+        Serial.println("Sending note to nostr" + recv);
+        nostrRelayManager.enqueueMessage(recv.c_str());
 
 #ifdef HAS_DISPLAY
         if (u8g2) {
