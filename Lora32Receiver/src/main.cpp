@@ -24,6 +24,9 @@ const int   daylightOffset_sec = 3600;
 char const *nsecHex = "bdd19cecd942ed8964c2e0ddc92d5e09838d3a09ebb230d974868be00886704b";
 char const *npubHex = "d0bfc94bd4324f7df2a7601c4177209828047c4d3904d64009a3c67fb5d5e7ca";
 
+long bootTimestamp = 0;
+long bootMillis = 0;
+
 unsigned long getUnixTimestamp() {
   time_t now;
   struct tm timeinfo;
@@ -69,6 +72,9 @@ void setup()
     Serial.println(WiFi.localIP());
 
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+    bootTimestamp = getUnixTimestamp();
+    bootMillis = millis();
 
     const char *const relays[] = {
         "relay.damus.io",
@@ -128,7 +134,7 @@ void broadcastTimestampOnLoRa()
         // construct a json doc with type = TIME and message = timestamp
         DynamicJsonDocument doc(1024);
         doc["type"] = "TIME";
-        doc["message"] = timestamp;
+        doc["content"] = timestamp;
         // serialise and base64 encode the doc
         String serialisedMessage = "";
         serializeJson(doc, serialisedMessage);
@@ -184,11 +190,19 @@ void loop()
         deserializeJson(doc, decoded);
         // now, set the receivedMessageMap element to the decoded json messagePart using currentPart index
         int currentPart = doc["currentPart"];
+
+        // if(lastPartNum > 0 && currentPart != lastPartNum + 1) {
+        //     Serial.println("Missing part, clearing map");
+        //     receivedMessageMap.clear();
+        // }
+
         lastPartNum = currentPart;
+
         // if current part is less than the last part, clear the map ready for a new message
         if (currentPart < lastPartNum) {
             receivedMessageMap.clear();
         }
+
         String checksum = doc["checksum"].as<String>();
         totalParts = doc["totalParts"];
         receivedMessageMap[currentPart - 1] = doc["messagePart"].as<String>(); // currentPart - 1 to make it 0 indexed for storage in the map
@@ -214,7 +228,6 @@ void loop()
         Serial.println("Serialised ACK message: " + serialisedMessage);
         doc.clear();
         String encodedMessage = base64Encode(serialisedMessage);
-        // destroy the doc
 
         // send the ACK
         LoRa.beginPacket();
@@ -238,7 +251,7 @@ void loop()
 
         Serial.println("Total parts: " + String(totalParts));
         // check if we have all the parts
-        if (currentPart < totalParts) {
+        if (totalParts > 0 && currentPart < totalParts) {
             Serial.println("Not all parts received yet, waiting for more");
             return;
         }
@@ -246,12 +259,17 @@ void loop()
         Serial.println("All parts received, joining message");
         // join all the parts together
         String joinedMessage = "";
-        for (int i = 0; i < totalParts; i++) {
+        for (int i = 0; i < receivedMessageMap.size(); i++) {
             joinedMessage += receivedMessageMap[i];
         }
         Serial.println("Joined message: " + joinedMessage);
-        // clear the receivedMessageMap
+
+        // clear the receivedMessageMap and reset counters
         receivedMessageMap.clear();
+        totalParts = 0;
+        currentPart = 0;
+        lastPartNum = 0;
+
         // base64 decode the joined message
         String decodedMessage = base64Decode(joinedMessage);
         Serial.println("Decoded message: " + decodedMessage);

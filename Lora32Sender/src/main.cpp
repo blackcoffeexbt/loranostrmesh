@@ -15,6 +15,11 @@ char const *npubHex = "d0bfc94bd4324f7df2a7601c4177209828047c4d3904d64009a3c67fb
 
 long timestamp = 0;
 
+void logToSerialAndBT(String message) {
+    Serial.println(message);
+    SerialBT.println(message);
+}
+
 void setup()
 {
     initBoard();
@@ -32,21 +37,23 @@ void setup()
     Serial.println("Bluetooth Device is Ready to Pair");
 
     if (SerialBT.available()) {
-        SerialBT.println("Type something in your phone app...");
+        logToSerialAndBT("Type something in your phone app...");
     }
 
-    // Create the nostr note
-    String testMessage = "I am a larger data package I am a larger data package I am a larger data package I am a larger data package";
-    nostr.setLogging(false);
-    String note = nostr.getNote(nsecHex, npubHex, timestamp, testMessage);
-    std::string encodedNote = base64Encode(note).c_str();
+    if(timestamp != 0) {
+        // Create the nostr note
+        String testMessage = "I am a larger data package I am a larger data package I am a larger data package I am a larger data package";
+        nostr.setLogging(false);
+        String note = nostr.getNote(nsecHex, npubHex, timestamp, testMessage);
+        std::string encodedNote = base64Encode(note).c_str();
 
-    // split the message into parts
-    size_t max_lora_packet_size = 100; // max lora byte size?
-    std::vector<std::string> parts;
-    split_string_into_parts(&encodedNote, max_lora_packet_size, &parts);
+        // split the message into parts
+        size_t max_lora_packet_size = 100; // max lora byte size?
+        std::vector<std::string> parts;
+        split_string_into_parts(&encodedNote, max_lora_packet_size, &parts);
 
-    broadcastMessage(&parts);
+        broadcastMessage(&parts);
+    }
 
     // for(const auto& part : parts) {
     //     Serial.println(part.c_str());
@@ -66,14 +73,29 @@ void loraReceive() {
         while (LoRa.available()) {
             recv += (char)LoRa.read();
         }
-        Serial.println("Received packet " + recv);
-        SerialBT.println("Received packet " + recv);
+        // lora messages in this network are all base64 encoded json docs
+        String decodedRecv = base64Decode(recv);
+        Serial.println("Received packet " + decodedRecv);
+        // deserialize the packet
+        DynamicJsonDocument doc(222);
+        deserializeJson(doc, decodedRecv);
+
+        // action depending on "type"
+        if(doc["type"] == "TIME") {
+            // set the time
+            timestamp = doc["content"];
+            Serial.println("Set timestamp to " + String(timestamp));
+        } else if(doc["type"] == "ACK") {
+            // do nothing
+            Serial.println("Received ACK");
+        } else {
+            Serial.println("Received unknown type " + doc["type"].as<String>());
+        }
+
         delay(20);
 
         // print RSSI of packet
-        Serial.print("' with RSSI ");
-        Serial.println(LoRa.packetRssi());
-        SerialBT.println("with RSSI " + LoRa.packetRssi());
+        logToSerialAndBT("with RSSI " + LoRa.packetRssi());
     }
 }
 
@@ -88,24 +110,27 @@ void handleBluetooth() {
     if (SerialBT.available()) {
         // read bluetooth message to string and then send back to the user over bluetooth and output on Serial.
         message = SerialBT.readString();
-        SerialBT.println("This is what you sent: " + message);
-        Serial.println("This is what you sent: " + message);
+        logToSerialAndBT("This is what you sent: " + message);
     }
 
     if(message == "") {
         return;
     }
     
-    Serial.println("Sending message: " + message);
-    SerialBT.println("Sending message: " + message);
-
-    // send packet
-    LoRa.beginPacket();
-    LoRa.print(message.c_str());
-    LoRa.endPacket();
+        // Create the nostr note
+    nostr.setLogging(false);
+    String note = nostr.getNote(nsecHex, npubHex, timestamp, message);
     message = "";
+    std::string encodedNote = base64Encode(note).c_str();
 
-    SerialBT.println("Packet sent");
+    // split the message into parts
+    size_t max_lora_packet_size = 100; // max lora byte size?
+    std::vector<std::string> parts;
+    split_string_into_parts(&encodedNote, max_lora_packet_size, &parts);
+
+    broadcastMessage(&parts);
+
+    logToSerialAndBT("Packet sent");
 }
 
 

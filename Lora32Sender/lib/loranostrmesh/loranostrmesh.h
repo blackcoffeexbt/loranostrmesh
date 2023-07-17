@@ -52,6 +52,7 @@ String base64Decode(String encodedMsg) {
 }
 
 const int MAX_RETRIES = 3;
+const int RETRY_TIME = 10000; // 10 seconds
 
 /**
  * @brief Send the message to the lora receiver
@@ -95,7 +96,7 @@ void broadcastMessage(std::vector<std::string>* messageParts) {
             unsigned long currentTime = millis();
 
             // Loop for 10 seconds or until ACK is received
-            while (currentTime - startTime < 10000) {
+            while (currentTime - startTime < RETRY_TIME) {
                 // Wait for a response
                 int packetSize = LoRa.parsePacket();
                 if (packetSize) {
