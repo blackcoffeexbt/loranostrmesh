@@ -107,6 +107,52 @@ String getSecsSinceLastReceive()
     return String(diff / 1000);
 }
 
+/** current timestamp is boot timestamp plus seconds delta of bootmillis and current millis */
+long getTimestampUsingBootMillis()
+{
+    long now = millis();
+    long diff = now - bootMillis;
+    return bootTimestamp + (diff / 1000);
+}
+
+long lastBroadcastTime = 0;
+
+/** broadcast timestamp millis every 10 seconds */
+void broadcastTimestampOnLoRa()
+{
+    long now = millis();
+    long diff = now - lastBroadcastTime;
+    if (diff > 10000) {
+        lastBroadcastTime = now;
+        long timestamp = getTimestampUsingBootMillis();
+        // construct a json doc with type = TIME and message = timestamp
+        DynamicJsonDocument doc(1024);
+        doc["type"] = "TIME";
+        doc["message"] = timestamp;
+        // serialise and base64 encode the doc
+        String serialisedMessage = "";
+        serializeJson(doc, serialisedMessage);
+        Serial.println("Serialised message: " + serialisedMessage);
+        doc.clear();
+        String encodedMessage = base64Encode(serialisedMessage);
+
+        LoRa.beginPacket();
+        LoRa.print(encodedMessage);
+        LoRa.endPacket();
+
+#ifdef HAS_DISPLAY
+        if (u8g2) {
+            String timestampStr = String(timestamp);
+            u8g2->clearBuffer();
+            char buf[256];
+            u8g2->drawStr(0, 10, "Timestamp broadcast");
+            u8g2->drawStr(0, 20, timestampStr.c_str());
+            u8g2->sendBuffer();
+        }
+#endif
+    }
+}
+
 String lastTimeUpdate = "";
 
 std::map<int, String> receivedMessageMap;
@@ -115,6 +161,7 @@ uint8_t lastPartNum = 0;
 
 void loop()
 {
+    broadcastTimestampOnLoRa();
     // try to parse packet
     int packetSize = LoRa.parsePacket();
     if (packetSize) {
