@@ -111,6 +111,7 @@ String lastTimeUpdate = "";
 
 std::map<int, String> receivedMessageMap;
 uint8_t totalParts = 0;
+uint8_t lastPartNum = 0;
 
 void loop()
 {
@@ -136,12 +137,16 @@ void loop()
         deserializeJson(doc, decoded);
         // now, set the receivedMessageMap element to the decoded json messagePart using currentPart index
         int currentPart = doc["currentPart"];
+        lastPartNum = currentPart;
+        // if current part is less than the last part, clear the map ready for a new message
+        if (currentPart < lastPartNum) {
+            receivedMessageMap.clear();
+        }
         String checksum = doc["checksum"].as<String>();
         totalParts = doc["totalParts"];
         receivedMessageMap[currentPart - 1] = doc["messagePart"].as<String>(); // currentPart - 1 to make it 0 indexed for storage in the map
         // destroy the doc
         doc.clear();
-
 
         // print RSSI of packet
         // Serial.print("' with RSSI ");
@@ -183,13 +188,15 @@ void loop()
         }
 #endif
 
+
+        Serial.println("Total parts: " + String(totalParts));
         // check if we have all the parts
-        if (receivedMessageMap.size() < totalParts) {
+        if (currentPart < totalParts) {
             Serial.println("Not all parts received yet, waiting for more");
             return;
         }
 
-        Serial.println("Total parts: " + String(totalParts));
+        Serial.println("All parts received, joining message");
         // join all the parts together
         String joinedMessage = "";
         for (int i = 0; i < totalParts; i++) {

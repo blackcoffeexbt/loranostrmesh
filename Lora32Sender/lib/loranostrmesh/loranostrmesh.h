@@ -59,15 +59,15 @@ const int MAX_RETRIES = 3;
  * @param messageParts 
  */
 void broadcastMessage(std::vector<std::string>* messageParts) {
-    uint8_t numParts = messageParts->size();
+    uint8_t totalParts = messageParts->size();
     // for each element of the messageParts
-    for (uint8_t i = 0; i < numParts; i++) {
+    for (uint8_t i = 0; i < totalParts; i++) {
         // take a subtring of length -5 of the current messagePart as a checksum
         std::string checksum = messageParts->at(i).substr(messageParts->at(i).length() - 5, messageParts->at(i).length());
         // create a DynamicJson document with items: numParts, currentPart, messagePart, checksum
-        Serial.println("Part " + String(i) + " of " + String(numParts) + " with checksum " + checksum.c_str());
+        Serial.println("Part " + String(i) + " of " + String(totalParts) + " with checksum " + checksum.c_str());
         DynamicJsonDocument doc(222);
-        doc["numParts"] = numParts;
+        doc["totalParts"] = totalParts;
         doc["currentPart"] = i + 1; // 1 indexed
         doc["messagePart"] = messageParts->at(i);
         doc["checksum"] = checksum;
