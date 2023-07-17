@@ -5,9 +5,10 @@
 #include "time.h"
 #include <NostrEvent.h>
 #include <NostrRelayManager.h>
+#include "loranostrmesh.h"
 
-const char* ssid     = "Maddox Guest"; // wifi SSID here
-const char* password = "MadGuest1"; // wifi password here
+const char* ssid     = "PLUSNET-MWC9Q2"; // wifi SSID here
+const char* password = "4NyMeXtNcQ6rqP"; // wifi password here
 
 NostrEvent nostr;
 NostrRelayManager nostrRelayManager;
@@ -107,6 +108,10 @@ String getSecsSinceLastReceive()
 }
 
 String lastTimeUpdate = "";
+
+std::map<int, String> receivedMessageMap;
+uint8_t totalParts = 0;
+
 void loop()
 {
     // try to parse packet
@@ -124,15 +129,45 @@ void loop()
 
         Serial.println(recv);
 
+        // the recv package will be a base64 encoded dynamicjson array, base64 decode and deserialise the json
+        String decoded = base64Decode(recv);
+        Serial.println("Decoded: " + decoded);
+        DynamicJsonDocument doc(1024);
+        deserializeJson(doc, decoded);
+        // now, set the receivedMessageMap element to the decoded json messagePart using currentPart index
+        int currentPart = doc["currentPart"];
+        String checksum = doc["checksum"].as<String>();
+        totalParts = doc["totalParts"];
+        receivedMessageMap[currentPart - 1] = doc["messagePart"].as<String>(); // currentPart - 1 to make it 0 indexed for storage in the map
+        // destroy the doc
+        doc.clear();
+
+
         // print RSSI of packet
-        Serial.print("' with RSSI ");
-        Serial.println(LoRa.packetRssi());
+        // Serial.print("' with RSSI ");
+        // Serial.println(LoRa.packetRssi());
 
+        // long timestamp = getUnixTimestamp();
+        // String note = nostr.getNote(nsecHex, npubHex, timestamp, recv.c_str());
+        // Serial.println("Sending note to nostr" + note);
+        // nostrRelayManager.enqueueMessage(note.c_str());
 
-        long timestamp = getUnixTimestamp();
-        String note = nostr.getNote(nsecHex, npubHex, timestamp, recv.c_str());
-        Serial.println("Sending not to nostr" + note);
-        nostrRelayManager.enqueueMessage(note.c_str());
+        // use the doc for the ACK message
+        doc["type"] = "ACK";
+        doc["checksum"] = checksum;
+
+        // serialise and base64 encode the doc
+        String serialisedMessage = "";
+        serializeJson(doc, serialisedMessage);
+        Serial.println("Serialised ACK message: " + serialisedMessage);
+        doc.clear();
+        String encodedMessage = base64Encode(serialisedMessage);
+        // destroy the doc
+
+        // send the ACK
+        LoRa.beginPacket();
+        LoRa.print(encodedMessage.c_str());
+        LoRa.endPacket();
 
 #ifdef HAS_DISPLAY
         if (u8g2) {
@@ -147,6 +182,27 @@ void loop()
             u8g2->sendBuffer();
         }
 #endif
+
+        // check if we have all the parts
+        if (receivedMessageMap.size() < totalParts) {
+            Serial.println("Not all parts received yet, waiting for more");
+            return;
+        }
+
+        Serial.println("Total parts: " + String(totalParts));
+        // join all the parts together
+        String joinedMessage = "";
+        for (int i = 0; i < totalParts; i++) {
+            joinedMessage += receivedMessageMap[i];
+        }
+        Serial.println("Joined message: " + joinedMessage);
+        // clear the receivedMessageMap
+        receivedMessageMap.clear();
+        // base64 decode the joined message
+        String decodedMessage = base64Decode(joinedMessage);
+        Serial.println("Decoded message: " + decodedMessage);
+        // send it over nostr
+        nostrRelayManager.enqueueMessage(decodedMessage.c_str());
     }
 
   nostrRelayManager.loop();
