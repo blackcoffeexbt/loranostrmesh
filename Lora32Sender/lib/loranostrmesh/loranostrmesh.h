@@ -51,8 +51,8 @@ String base64Decode(String encodedMsg) {
   return String((char *)decoded);
 }
 
-const int MAX_RETRIES = 3;
-const int RETRY_TIME = 10000; // 10 seconds
+const int MAX_RETRIES = 5;
+const int RETRY_TIME = 3000; // 10 seconds
 
 /**
  * @brief Send the message to the lora receiver

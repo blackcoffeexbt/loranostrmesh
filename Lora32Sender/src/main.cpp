@@ -33,6 +33,8 @@ void setup()
         while (1);
     }
 
+    LoRa.setTxPower(20); // 20 is max power!
+
     SerialBT.begin("loranostrmesh"); // Name of your Bluetooth Signal
     Serial.println("Bluetooth Device is Ready to Pair");
 
