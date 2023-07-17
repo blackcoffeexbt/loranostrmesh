@@ -40,26 +40,20 @@ void setup()
         logToSerialAndBT("Type something in your phone app...");
     }
 
-    if(timestamp != 0) {
-        // Create the nostr note
-        String testMessage = "I am a larger data package I am a larger data package I am a larger data package I am a larger data package";
-        nostr.setLogging(false);
-        String note = nostr.getNote(nsecHex, npubHex, timestamp, testMessage);
-        std::string encodedNote = base64Encode(note).c_str();
+    // if(timestamp != 0) {
+    //     // Create the nostr note
+    //     String testMessage = "I am a larger data package I am a larger data package I am a larger data package I am a larger data package";
+    //     nostr.setLogging(false);
+    //     String note = nostr.getNote(nsecHex, npubHex, timestamp, testMessage);
+    //     std::string encodedNote = base64Encode(note).c_str();
 
-        // split the message into parts
-        size_t max_lora_packet_size = 100; // max lora byte size?
-        std::vector<std::string> parts;
-        split_string_into_parts(&encodedNote, max_lora_packet_size, &parts);
+    //     // split the message into parts
+    //     size_t max_lora_packet_size = 100; // max lora byte size?
+    //     std::vector<std::string> parts;
+    //     split_string_into_parts(&encodedNote, max_lora_packet_size, &parts);
 
-        broadcastMessage(&parts);
-    }
-
-    // for(const auto& part : parts) {
-    //     Serial.println(part.c_str());
+    //     broadcastMessage(&parts);
     // }
-
-    // Serial.println("Note: " + note);
 
 }
 
@@ -84,12 +78,13 @@ void loraReceive() {
         if(doc["type"] == "TIME") {
             // set the time
             timestamp = doc["content"];
-            Serial.println("Set timestamp to " + String(timestamp));
+            logToSerialAndBT("Set timestamp to " + String(timestamp));
         } else if(doc["type"] == "ACK") {
             // do nothing
             Serial.println("Received ACK");
         } else {
             Serial.println("Received unknown type " + doc["type"].as<String>());
+            logToSerialAndBT("Set timestamp to " + String(timestamp));
         }
 
         delay(20);
