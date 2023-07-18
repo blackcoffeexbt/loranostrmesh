@@ -2,6 +2,8 @@
 #include <string>
 #include <Base64.hpp>
 
+#define LORA_MAX_PACKET_SIZE 100
+
 void split_string_into_parts(std::string* source, size_t part_length, std::vector<std::string>* result) {
     // Make sure source and result are not null
     if(source == nullptr || result == nullptr)
@@ -51,59 +53,122 @@ String base64Decode(String encodedMsg) {
   return String((char *)decoded);
 }
 
+const int MAX_RETRIES = 5;
+const int RETRY_TIME = 3000; // 10 seconds
+
 /**
- * @brief Send the message to the lora receiver
+ * @brief Broadcast a Nostr event over LoRa
  * 
- * @param messageParts 
+ * @param serialisedEvent A serialised Nostr event JSON
+ * @param callback A callback function to call when the ACK is received
  */
-void broadcastMessage(std::vector<std::string>* messageParts) {
-    uint8_t numParts = messageParts->size();
-    uint8_t currentBroadcastAttempt = 0;
+void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDocument*)) {
+
+    std::string base64EncodedEvent = base64Encode(*serialisedEvent).c_str();
+    
+    // split the message into parts
+    std::vector<std::string> messageParts;
+    split_string_into_parts(&base64EncodedEvent, LORA_MAX_PACKET_SIZE, &messageParts);
+
+    uint8_t totalParts = messageParts.size();
     // for each element of the messageParts
-    for (uint8_t i = 0; i < numParts; i++) {
+    for (uint8_t i = 0; i < totalParts; i++) {
         // take a subtring of length -5 of the current messagePart as a checksum
-        std::string checksum = messageParts->at(i).substr(messageParts->at(i).length() - 5, messageParts->at(i).length());
+        std::string checksum = messageParts.at(i).substr(messageParts.at(i).length() - 5, messageParts.at(i).length());
         // create a DynamicJson document with items: numParts, currentPart, messagePart, checksum
+        Serial.println("Part " + String(i) + " of " + String(totalParts) + " with checksum " + checksum.c_str());
         DynamicJsonDocument doc(222);
-        doc["numParts"] = numParts;
-        doc["currentPart"] = i;
-        doc["messagePart"] = messageParts->at(i);
+        doc["totalParts"] = totalParts;
+        doc["currentPart"] = i + 1; // 1 indexed
+        doc["messagePart"] = messageParts.at(i);
         doc["checksum"] = checksum;
         // serialise and base64 encode it
         String serialisedDoc = "";
         serializeJson(doc, serialisedDoc);
         String encodedDoc = base64Encode(serialisedDoc);
-        // transmit it over lora and wait for a response, if elapsed time > 10 seconds and currentBroadcastAttempt < 3, try again
-        uint32_t startTime = millis();
-        uint32_t currentTime = millis();
-        while (currentTime - startTime < 10000 && currentBroadcastAttempt < 3) {
+        doc.clear();
+
+        // Initialize retry counter
+        int retryCount = 0;
+
+        // Loop until ACK is received or maximum retries reached
+        while (retryCount < MAX_RETRIES) {
+            Serial.println("Broadcast number " + String(retryCount) + " of " + String(MAX_RETRIES) + "");
+
             // transmit the encodedDoc
             LoRa.beginPacket();
+            Serial.println("Sending packet " + encodedDoc);
             LoRa.print(encodedDoc);
             LoRa.endPacket();
-            // wait for a response
-            int packetSize = LoRa.parsePacket();
-            if (packetSize) {
-                // received a packet
-                String recv = "";
-                // read packet
-                while (LoRa.available()) {
-                    recv += (char)LoRa.read();
+
+            // Reset start time for each retry
+            unsigned long startTime = millis();
+            unsigned long currentTime = millis();
+
+            // Loop for 10 seconds or until ACK is received
+            while (currentTime - startTime < RETRY_TIME) {
+                // Wait for a response
+                int packetSize = LoRa.parsePacket();
+                if (packetSize) {
+                    // Received a packet
+                    String recv = "";
+                    // Read packet
+                    while (LoRa.available()) {
+                        recv += (char)LoRa.read();
+                    }
+                    // Decode the packet
+                    String decodedRecv = base64Decode(recv);
+                    Serial.println("Received packet " + decodedRecv);
+                    // Deserialize the packet
+                    DynamicJsonDocument recvDoc(222);
+                    deserializeJson(recvDoc, decodedRecv);
+                    // Check if the checksum matches
+                    if (recvDoc["type"] == "ACK" && recvDoc["checksum"] == checksum) {
+                        // run the callback function, doc as argument
+                        callback(&recvDoc);
+                        // If it does, break out of the while
+                        retryCount = MAX_RETRIES; // Break out of the outer retry loop
+                        break; // Break out of the inner while
+                    }
                 }
-                // decode the packet
-                String decodedRecv = base64Decode(recv);
-                // deserialise the packet
-                DynamicJsonDocument recvDoc(222);
-                deserializeJson(recvDoc, decodedRecv);
-                // check if the checksum matches
-                if (recvDoc["checksum"] == checksum) {
-                    // if it does, break out of the while
-                    break;
-                }
+                
+                currentTime = millis();
             }
-            // if it doesn't, increment currentBroadcastAttempt and currentTime
-            currentBroadcastAttempt++;
-            currentTime = millis();
+            
+            // Increase the retry count
+            retryCount++;
+
+            // If ACK is received, no need to retry
+            if (retryCount == MAX_RETRIES) {
+                break;
+            }
         }
     }
+}
+
+/**
+ * @brief Decode the LoRa package
+ * 
+ * @param loraPackage 
+ * @param doc 
+ */
+void decodeLoraPackage(String* base64EncodedPackage, DynamicJsonDocument* doc) {
+    // decode the lora package
+    String decodedLoraPackage = base64Decode(*base64EncodedPackage);
+    // deserialize the lora package
+    deserializeJson(*doc, decodedLoraPackage);
+}
+
+/**
+ * @brief Encode the LoRa package for transmission
+ * 
+ * @param doc 
+ * @param base64EncodedPackage 
+ */
+void encodeLoraPackage(DynamicJsonDocument* doc, String* base64EncodedPackage) {
+    // serialise the doc
+    String serialisedDoc = "";
+    serializeJson(*doc, serialisedDoc);
+    // encode the doc
+    *base64EncodedPackage = base64Encode(serialisedDoc);
 }

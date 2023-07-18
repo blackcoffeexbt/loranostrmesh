@@ -2,6 +2,8 @@
 #include <string>
 #include <Base64.hpp>
 
+#define LORA_MAX_PACKET_SIZE 100
+
 void split_string_into_parts(std::string* source, size_t part_length, std::vector<std::string>* result) {
     // Make sure source and result are not null
     if(source == nullptr || result == nullptr)
@@ -55,22 +57,30 @@ const int MAX_RETRIES = 5;
 const int RETRY_TIME = 3000; // 10 seconds
 
 /**
- * @brief Send the message to the lora receiver
+ * @brief Broadcast a Nostr event over LoRa
  * 
- * @param messageParts 
+ * @param serialisedEvent A serialised Nostr event JSON
+ * @param callback A callback function to call when the ACK is received
  */
-void broadcastMessage(std::vector<std::string>* messageParts) {
-    uint8_t totalParts = messageParts->size();
+void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDocument*)) {
+
+    std::string base64EncodedEvent = base64Encode(*serialisedEvent).c_str();
+    
+    // split the message into parts
+    std::vector<std::string> messageParts;
+    split_string_into_parts(&base64EncodedEvent, LORA_MAX_PACKET_SIZE, &messageParts);
+
+    uint8_t totalParts = messageParts.size();
     // for each element of the messageParts
     for (uint8_t i = 0; i < totalParts; i++) {
         // take a subtring of length -5 of the current messagePart as a checksum
-        std::string checksum = messageParts->at(i).substr(messageParts->at(i).length() - 5, messageParts->at(i).length());
+        std::string checksum = messageParts.at(i).substr(messageParts.at(i).length() - 5, messageParts.at(i).length());
         // create a DynamicJson document with items: numParts, currentPart, messagePart, checksum
         Serial.println("Part " + String(i) + " of " + String(totalParts) + " with checksum " + checksum.c_str());
         DynamicJsonDocument doc(222);
         doc["totalParts"] = totalParts;
         doc["currentPart"] = i + 1; // 1 indexed
-        doc["messagePart"] = messageParts->at(i);
+        doc["messagePart"] = messageParts.at(i);
         doc["checksum"] = checksum;
         // serialise and base64 encode it
         String serialisedDoc = "";
@@ -114,6 +124,8 @@ void broadcastMessage(std::vector<std::string>* messageParts) {
                     deserializeJson(recvDoc, decodedRecv);
                     // Check if the checksum matches
                     if (recvDoc["type"] == "ACK" && recvDoc["checksum"] == checksum) {
+                        // run the callback function, doc as argument
+                        callback(&recvDoc);
                         // If it does, break out of the while
                         retryCount = MAX_RETRIES; // Break out of the outer retry loop
                         break; // Break out of the inner while
@@ -132,4 +144,31 @@ void broadcastMessage(std::vector<std::string>* messageParts) {
             }
         }
     }
+}
+
+/**
+ * @brief Decode the LoRa package
+ * 
+ * @param loraPackage 
+ * @param doc 
+ */
+void decodeLoraPackage(String* base64EncodedPackage, DynamicJsonDocument* doc) {
+    // decode the lora package
+    String decodedLoraPackage = base64Decode(*base64EncodedPackage);
+    // deserialize the lora package
+    deserializeJson(*doc, decodedLoraPackage);
+}
+
+/**
+ * @brief Encode the LoRa package for transmission
+ * 
+ * @param doc 
+ * @param base64EncodedPackage 
+ */
+void encodeLoraPackage(DynamicJsonDocument* doc, String* base64EncodedPackage) {
+    // serialise the doc
+    String serialisedDoc = "";
+    serializeJson(*doc, serialisedDoc);
+    // encode the doc
+    *base64EncodedPackage = base64Encode(serialisedDoc);
 }

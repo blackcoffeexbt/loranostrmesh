@@ -42,21 +42,6 @@ void setup()
         logToSerialAndBT("Type something in your phone app...");
     }
 
-    // if(timestamp != 0) {
-    //     // Create the nostr note
-    //     String testMessage = "I am a larger data package I am a larger data package I am a larger data package I am a larger data package";
-    //     nostr.setLogging(false);
-    //     String note = nostr.getNote(nsecHex, npubHex, timestamp, testMessage);
-    //     std::string encodedNote = base64Encode(note).c_str();
-
-    //     // split the message into parts
-    //     size_t max_lora_packet_size = 100; // max lora byte size?
-    //     std::vector<std::string> parts;
-    //     split_string_into_parts(&encodedNote, max_lora_packet_size, &parts);
-
-    //     broadcastMessage(&parts);
-    // }
-
 }
 
 void loraReceive() {
@@ -74,19 +59,25 @@ void loraReceive() {
         Serial.println("Received packet " + decodedRecv);
         // deserialize the packet
         DynamicJsonDocument doc(222);
-        deserializeJson(doc, decodedRecv);
+
+        decodeLoraPackage(&recv, &doc);
 
         // action depending on "type"
         if(doc["type"] == "TIME") {
             // set the time
             timestamp = doc["content"];
-            logToSerialAndBT("Set timestamp to " + String(timestamp));
+            // if timestamp is real (i.e. between two realisitic dates)
+            if(timestamp > 1689673884 && timestamp < 4845347483) {
+                logToSerialAndBT("Set timestamp to " + String(timestamp));
+            }
         } else if(doc["type"] == "ACK") {
             // do nothing
             Serial.println("Received ACK");
+        } else if(doc["type"] == "NOSTR_EVENT") {
+            logToSerialAndBT("Received Nostr event");
+            logToSerialAndBT("Content: " + doc["content"].as<String>());
         } else {
             Serial.println("Received unknown type " + doc["type"].as<String>());
-            logToSerialAndBT("Set timestamp to " + String(timestamp));
         }
 
         delay(20);
@@ -99,6 +90,10 @@ void loraReceive() {
 uint8_t currentPart = 0;
 
 String message = "";
+
+void ackCallback(DynamicJsonDocument* doc) {
+    logToSerialAndBT("Received ACK for part " + String(doc->as<JsonObject>()["currentPart"].as<uint8_t>()) + " of " + String(doc->as<JsonObject>()["totalParts"].as<uint8_t>()));
+}
 
 void handleBluetooth() {
     if (Serial.available()) {
@@ -118,14 +113,8 @@ void handleBluetooth() {
     nostr.setLogging(false);
     String note = nostr.getNote(nsecHex, npubHex, timestamp, message);
     message = "";
-    std::string encodedNote = base64Encode(note).c_str();
 
-    // split the message into parts
-    size_t max_lora_packet_size = 100; // max lora byte size?
-    std::vector<std::string> parts;
-    split_string_into_parts(&encodedNote, max_lora_packet_size, &parts);
-
-    broadcastMessage(&parts);
+    broadcastNostrEvent(&note, &ackCallback);
 
     logToSerialAndBT("Packet sent");
 }

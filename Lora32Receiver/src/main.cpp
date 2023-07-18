@@ -44,7 +44,19 @@ void okEvent(const std::string& key, const char* payload) {
     Serial.println("OK event");
     Serial.println("payload is: ");
     Serial.println(payload);
-    // writeToDisplay("OK event");
+    // create an ok event json doc
+    DynamicJsonDocument doc(222);
+    doc["type"] = "NOSTR_EVENT";
+    doc["event"] = "OK";
+    doc["content"] = String(payload);
+    // encode
+    String serialisedMessage = "";
+    encodeLoraPackage(&doc, &serialisedMessage);
+    doc.clear();
+    // broadcast on lora
+    LoRa.beginPacket();
+    LoRa.print(serialisedMessage);
+    LoRa.endPacket();
 }
 
 void nip01Event(const std::string& key, const char* payload) {
@@ -128,7 +140,12 @@ void broadcastTimestampOnLoRa()
 {
     long now = millis();
     long diff = now - lastBroadcastTime;
+    
     if (diff > 10000) {
+        // Sometimes the timestamp might not have been set correctly on boot, try and get it again
+        if(bootTimestamp < 1689618583) {
+            bootTimestamp = getUnixTimestamp();
+        }
         lastBroadcastTime = now;
         long timestamp = getTimestampUsingBootMillis();
         // construct a json doc with type = TIME and message = timestamp
@@ -220,6 +237,8 @@ void loop()
 
         // use the doc for the ACK message
         doc["type"] = "ACK";
+        doc["currentPart"] = currentPart;
+        doc["totalParts"] = totalParts;
         doc["checksum"] = checksum;
 
         // serialise and base64 encode the doc
