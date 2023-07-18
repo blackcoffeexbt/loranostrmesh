@@ -6,6 +6,8 @@
 
 #include "loranostrmesh.h"
 
+#define RX_QUEUE_SIZE 1024
+
 BluetoothSerial SerialBT;
 
 NostrEvent nostr;
@@ -14,6 +16,18 @@ char const *nsecHex = "bdd19cecd942ed8964c2e0ddc92d5e09838d3a09ebb230d974868be00
 char const *npubHex = "d0bfc94bd4324f7df2a7601c4177209828047c4d3904d64009a3c67fb5d5e7ca";
 
 long timestamp = 0;
+
+void oledDisplay(String message) {
+#ifdef HAS_DISPLAY
+    if (u8g2) {
+        char buf[256];
+        u8g2->clearBuffer();
+        snprintf(buf, sizeof(buf), message.c_str());
+        u8g2->drawStr(5, 30, buf);
+        u8g2->sendBuffer();
+    }
+#endif
+}
 
 void logToSerialAndBT(String message) {
     Serial.println(message);
@@ -74,8 +88,15 @@ void loraReceive() {
             // do nothing
             Serial.println("Received ACK");
         } else if(doc["type"] == "NOSTR_EVENT") {
-            logToSerialAndBT("Received Nostr event");
-            logToSerialAndBT("Content: " + doc["content"].as<String>());
+            if(doc["event"] == "OK") {
+                logToSerialAndBT("Received Nostr OK event");
+                logToSerialAndBT("Content: " + doc["content"].as<String>());
+                oledDisplay("Received Nostr event: OK");
+            } else {
+                logToSerialAndBT("Received Nostr event");
+                logToSerialAndBT("Content: " + doc["content"].as<String>());
+                oledDisplay("Received Nostr event: Other");
+            }
         } else {
             Serial.println("Received unknown type " + doc["type"].as<String>());
         }
@@ -93,6 +114,7 @@ String message = "";
 
 void ackCallback(DynamicJsonDocument* doc) {
     logToSerialAndBT("Received ACK for part " + String(doc->as<JsonObject>()["currentPart"].as<uint8_t>()) + " of " + String(doc->as<JsonObject>()["totalParts"].as<uint8_t>()));
+    oledDisplay("ACK " + String(doc->as<JsonObject>()["currentPart"].as<uint8_t>()) + "/" + String(doc->as<JsonObject>()["totalParts"].as<uint8_t>()));
 }
 
 void handleBluetooth() {
@@ -103,6 +125,7 @@ void handleBluetooth() {
         // read bluetooth message to string and then send back to the user over bluetooth and output on Serial.
         message = SerialBT.readString();
         logToSerialAndBT("This is what you sent: " + message);
+        oledDisplay("Broadcasting message...");
     }
 
     if(message == "") {
@@ -112,6 +135,7 @@ void handleBluetooth() {
     // unable to send if timestamp is not set
     if(timestamp == 0) {
         logToSerialAndBT("Timestamp not set, not broadcasting message. Please wait for timestamp and try again.");
+        message = "";
         return;
     }
     
@@ -129,20 +153,15 @@ void handleBluetooth() {
 void loop()
 {
 
+    // if (Serial.available()) {
+    //     SerialBT.write(Serial.read());
+    // }
+    // if (SerialBT.available()) {
+    //     // read bluetooth message to string and then send back to the user over bluetooth and output on Serial.
+    //     message = SerialBT.readString();
+    //     Serial.println("This is what you sent: " + message);
+    // }
+
     loraReceive();
-
     handleBluetooth();
-
-    
-
-#ifdef HAS_DISPLAY
-    if (u8g2) {
-        char buf[256];
-        u8g2->clearBuffer();
-        u8g2->drawStr(0, 12, "Transmitting: OK!");
-        snprintf(buf, sizeof(buf), "Sending: %d", message);
-        u8g2->drawStr(0, 30, buf);
-        u8g2->sendBuffer();
-    }
-#endif
 }
