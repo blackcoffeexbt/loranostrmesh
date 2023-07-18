@@ -108,8 +108,14 @@ void handleBluetooth() {
     if(message == "") {
         return;
     }
+
+    // unable to send if timestamp is not set
+    if(timestamp == 0) {
+        logToSerialAndBT("Timestamp not set, not broadcasting message. Please wait for timestamp and try again.");
+        return;
+    }
     
-        // Create the nostr note
+    // Create the nostr note
     nostr.setLogging(false);
     String note = nostr.getNote(nsecHex, npubHex, timestamp, message);
     message = "";
