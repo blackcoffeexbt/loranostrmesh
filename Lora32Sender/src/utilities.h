@@ -1,4 +1,3 @@
-
 #pragma once
 
 /*
@@ -184,12 +183,3 @@
 #else
 #error "For the first use, please define the board version and model in <utilities. h>"
 #endif
-
-
-
-
-
-
-
-
-

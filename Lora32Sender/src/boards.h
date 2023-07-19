@@ -358,18 +358,18 @@ void initBoard()
         u8g2->setFontDirection(0);
         u8g2->firstPage();
         do {
-            u8g2->setFont(u8g2_font_inb19_mr);
-            u8g2->drawStr(0, 30, "LilyGo");
+            u8g2->setFont(u8g2_font_inb16_mr);
+            u8g2->drawStr(0, 30, "Nostr");
             u8g2->drawHLine(2, 35, 47);
             u8g2->drawHLine(3, 36, 47);
             u8g2->drawVLine(45, 32, 12);
             u8g2->drawVLine(46, 33, 12);
             u8g2->setFont(u8g2_font_inb19_mf);
-            u8g2->drawStr(58, 60, "LoRa");
+            u8g2->drawStr(0, 60, "LoRaMesh");
         } while ( u8g2->nextPage() );
         u8g2->sendBuffer();
         u8g2->setFont(u8g2_font_fur11_tf);
-        delay(3000);
+        delay(1000);
     }
 #endif
 
