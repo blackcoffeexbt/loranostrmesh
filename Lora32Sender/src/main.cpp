@@ -3,7 +3,7 @@
 #include "BluetoothSerial.h"
 #include "WiFiClientSecure.h"
 #include <NostrEvent.h>
-
+#include "helpers.h"
 #include "loranostrmesh.h"
 
 #define RX_QUEUE_SIZE 1024
@@ -17,22 +17,13 @@ char const *npubHex = "d0bfc94bd4324f7df2a7601c4177209828047c4d3904d64009a3c67fb
 
 long timestamp = 0;
 
-void oledDisplay(String message) {
-#ifdef HAS_DISPLAY
-    if (u8g2) {
-        char buf[256];
-        u8g2->clearBuffer();
-        snprintf(buf, sizeof(buf), message.c_str());
-        u8g2->drawStr(5, 30, buf);
-        u8g2->sendBuffer();
-    }
-#endif
-}
-
 void logToSerialAndBT(String message) {
     Serial.println(message);
     SerialBT.println(message);
 }
+
+// define bluetooth pin
+const char *btPin = "1234";
 
 void setup()
 {
@@ -50,6 +41,10 @@ void setup()
     LoRa.setTxPower(20); // 20 is max power!
 
     SerialBT.begin("loranostrmesh"); // Name of your Bluetooth Signal
+    SerialBT.setPin(btPin); // Your Pin
+    oledDisplay("Bluetooth ready");
+    oledDisplay("Pin: " + String(btPin), 5, 40);
+
     Serial.println("Bluetooth Device is Ready to Pair");
 
     if (SerialBT.available()) {
