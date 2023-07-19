@@ -17,13 +17,32 @@ char const *npubHex = "d0bfc94bd4324f7df2a7601c4177209828047c4d3904d64009a3c67fb
 
 long timestamp = 0;
 
-void logToSerialAndBT(String message) {
-    Serial.println(message);
-    SerialBT.println(message);
-}
+void handleBluetooth();
+void loraReceive();
+void logToSerialAndBT(String message);
+void ackCallback(DynamicJsonDocument* doc);
 
 // define bluetooth pin
 const char *btPin = "1234";
+
+// define freertos task function
+void task1(void *parameter)
+{
+    while (1)
+    {
+        handleBluetooth();
+    }
+}
+
+// lora task
+void task2(void *parameter)
+{
+    while (1)
+    {
+        loraReceive();
+    }
+}
+
 
 void setup()
 {
@@ -42,7 +61,7 @@ void setup()
 
     SerialBT.begin("loranostrmesh"); // Name of your Bluetooth Signal
     SerialBT.setPin(btPin); // Your Pin
-    oledDisplay("Bluetooth ready", 5, 5);
+    oledDisplay("Bluetooth ready", 5, 20);
     oledDisplay("Pin: " + String(btPin), 5, 40, false);
 
     Serial.println("Bluetooth Device is Ready to Pair");
@@ -51,8 +70,40 @@ void setup()
         logToSerialAndBT("Type something in your phone app...");
     }
 
+    // run both freertos tasks
+    xTaskCreatePinnedToCore(
+        task1,   /* Task function. */
+        "Bluetooth Handler", /* name of task. */
+        10000,   /* Stack size of task */
+        NULL,    /* parameter of the task */
+        1,       /* priority of the task */
+        NULL,    /* Task handle to keep track of created task */
+        0);      /* pin task to core 0 */
+
+    xTaskCreatePinnedToCore(
+        task2,   /* Task function. */
+        "LoRa Receiver", /* name of task. */
+        10000,   /* Stack size of task */
+        NULL,    /* parameter of the task */
+        1,       /* priority of the task */
+        NULL,    /* Task handle to keep track of created task */
+        1);      /* pin task to core 1 */
+
 }
 
+uint8_t currentPart = 0;
+
+String message = "";
+
+
+void loop()
+{
+}
+
+/**
+ * @brief Receive LoRa packets
+ * 
+ */
 void loraReceive() {
     // try to parse packet
     int packetSize = LoRa.parsePacket();
@@ -103,15 +154,30 @@ void loraReceive() {
     }
 }
 
-uint8_t currentPart = 0;
+/**
+ * @brief Log a message to Serial and Bluetooth
+ * 
+ * @param message 
+ */
+void logToSerialAndBT(String message) {
+    Serial.println(message);
+    SerialBT.println(message);
+}
 
-String message = "";
-
+/**
+ * @brief Callback for LoRa ACK messages
+ * 
+ * @param doc 
+ */
 void ackCallback(DynamicJsonDocument* doc) {
     logToSerialAndBT("Received ACK for part " + String(doc->as<JsonObject>()["currentPart"].as<uint8_t>()) + " of " + String(doc->as<JsonObject>()["totalParts"].as<uint8_t>()));
     oledDisplay("ACK " + String(doc->as<JsonObject>()["currentPart"].as<uint8_t>()) + "/" + String(doc->as<JsonObject>()["totalParts"].as<uint8_t>()));
 }
 
+/**
+ * @brief Handle incoming bluetooth communication data
+ * 
+ */
 void handleBluetooth() {
     if (Serial.available()) {
         SerialBT.write(Serial.read());
@@ -142,21 +208,4 @@ void handleBluetooth() {
     broadcastNostrEvent(&note, &ackCallback);
 
     logToSerialAndBT("Packet sent");
-}
-
-
-void loop()
-{
-
-    // if (Serial.available()) {
-    //     SerialBT.write(Serial.read());
-    // }
-    // if (SerialBT.available()) {
-    //     // read bluetooth message to string and then send back to the user over bluetooth and output on Serial.
-    //     message = SerialBT.readString();
-    //     Serial.println("This is what you sent: " + message);
-    // }
-
-    loraReceive();
-    handleBluetooth();
 }
