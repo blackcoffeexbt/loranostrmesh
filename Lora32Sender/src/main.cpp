@@ -6,8 +6,6 @@
 #include "helpers.h"
 #include "loranostrmesh.h"
 
-#define RX_QUEUE_SIZE 1024
-
 BluetoothSerial SerialBT;
 
 NostrEvent nostr;
@@ -88,6 +86,9 @@ void setup()
         1,       /* priority of the task */
         NULL,    /* Task handle to keep track of created task */
         1);      /* pin task to core 1 */
+
+    // Start the tasks
+    vTaskStartScheduler();
 
 }
 
@@ -182,11 +183,12 @@ void handleBluetooth() {
     if (Serial.available()) {
         SerialBT.write(Serial.read());
     }
-    if (SerialBT.available()) {
+
+    
+    while (SerialBT.available()) {
         // read bluetooth message to string and then send back to the user over bluetooth and output on Serial.
-        message = SerialBT.readString();
-        logToSerialAndBT("This is what you sent: " + message);
-        oledDisplay("Broadcasting message...");
+        char incomingByte = SerialBT.read();
+        message += SerialBT.readString();
     }
 
     if(message == "") {
@@ -199,10 +201,13 @@ void handleBluetooth() {
         message = "";
         return;
     }
-    
+
+    logToSerialAndBT("This is what you sent: " + message);
+    oledDisplay("Broadcasting message...");
     // Create the nostr note
     nostr.setLogging(false);
     String note = nostr.getNote(nsecHex, npubHex, timestamp, message);
+    Serial.println("Note looks like this" + note);
     message = "";
 
     broadcastNostrEvent(&note, &ackCallback);

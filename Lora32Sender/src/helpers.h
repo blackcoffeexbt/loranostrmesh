@@ -8,7 +8,7 @@
  * @param x pos - optional
  * @param y pos - optional
  */
-void oledDisplay(String message, int x = 5, int y = 5, bool clearScreen = true) {
+void oledDisplay(String message, int x = 5, int y = 20, bool clearScreen = true) {
 #ifdef HAS_DISPLAY
     if (u8g2) {
         char buf[256];

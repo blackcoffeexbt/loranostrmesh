@@ -64,6 +64,8 @@ const int RETRY_TIME = 3000; // 10 seconds
  */
 void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDocument*)) {
 
+    Serial.println("Broadcasting Nostr event");
+
     std::string base64EncodedEvent = base64Encode(*serialisedEvent).c_str();
     
     // split the message into parts
