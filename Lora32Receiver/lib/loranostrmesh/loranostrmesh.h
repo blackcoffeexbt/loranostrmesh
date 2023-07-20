@@ -126,7 +126,9 @@ void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDo
                     // Check if the checksum matches
                     if (recvDoc["type"] == "ACK" && recvDoc["checksum"] == checksum) {
                         // run the callback function, doc as argument
-                        callback(&recvDoc);
+                        if(callback != nullptr) {
+                            callback(&recvDoc);
+                        }
                         // If it does, break out of the while
                         retryCount = MAX_RETRIES; // Break out of the outer retry loop
                         break; // Break out of the inner while
