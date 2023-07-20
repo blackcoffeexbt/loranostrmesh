@@ -158,7 +158,7 @@ void broadcastTimestampOnLoRa()
         lastBroadcastTime = now;
         long timestamp = getTimestampUsingBootMillis();
         // construct a json doc with type = TIME and message = timestamp
-        DynamicJsonDocument doc(1024);
+        DynamicJsonDocument doc(222);
         doc["type"] = "TIME";
         doc["content"] = timestamp;
         // serialise and base64 encode the doc
@@ -215,7 +215,7 @@ void loop()
       // the recv package will be a base64 encoded dynamicjson array, base64 decode and deserialise the json
       String decoded = base64Decode(recv);
       Serial.println("Decoded: " + decoded);
-      DynamicJsonDocument doc(1024);
+      DynamicJsonDocument doc(222);
       deserializeJson(doc, decoded);
 
       if(doc["type"] == "NOSTR_NOTE_TX_REQ") {

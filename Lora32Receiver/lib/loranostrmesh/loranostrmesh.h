@@ -2,7 +2,7 @@
 #include <string>
 #include <Base64.hpp>
 
-#define LORA_MAX_PACKET_SIZE 80
+#define LORA_MAX_PACKET_SIZE 90
 
 void split_string_into_parts(std::string* source, size_t part_length, std::vector<std::string>* result) {
     // Make sure source and result are not null
@@ -131,6 +131,7 @@ void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDo
                         }
                         // If it does, break out of the while
                         retryCount = MAX_RETRIES; // Break out of the outer retry loop
+                        recvDoc.clear();
                         break; // Break out of the inner while
                     }
                 }
