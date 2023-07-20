@@ -369,7 +369,7 @@ void initBoard()
         } while ( u8g2->nextPage() );
         u8g2->sendBuffer();
         u8g2->setFont(u8g2_font_fur11_tf);
-        delay(3000);
+        delay(500);
     }
 #endif
 

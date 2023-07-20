@@ -7,8 +7,15 @@
 #include <NostrRelayManager.h>
 #include "loranostrmesh.h"
 
-const char* ssid     = "PLUSNET-MWC9Q2"; // wifi SSID here
-const char* password = "4NyMeXtNcQ6rqP"; // wifi password here
+#include <WebServer.h>
+#include <AutoConnect.h>
+
+WebServer Server;
+
+WebServer server;
+AutoConnect portal(server);
+AutoConnectConfig config;
+String apPassword = "ToTheMoon1"; //default WiFi AP password
 
 NostrEvent nostr;
 NostrRelayManager nostrRelayManager;
@@ -26,6 +33,10 @@ char const *npubHex = "d0bfc94bd4324f7df2a7601c4177209828047c4d3904d64009a3c67fb
 
 long bootTimestamp = 0;
 long bootMillis = 0;
+
+bool whileCP(void);
+void initWiFi();
+void configureAccessPoint();
 
 unsigned long getUnixTimestamp() {
   time_t now;
@@ -46,8 +57,7 @@ void okEvent(const std::string& key, const char* payload) {
     Serial.println(payload);
     // create an ok event json doc
     DynamicJsonDocument doc(222);
-    doc["type"] = "NOSTR_EVENT";
-    doc["event"] = "OK";
+    doc["type"] = "NOSTR_OK_EVENT";
     doc["content"] = String(payload);
     // encode
     String serialisedMessage = "";
@@ -68,20 +78,18 @@ void nip01Event(const std::string& key, const char* payload) {
     // writeToDisplay(payload);
 }
 
+void nip04Event(const std::string& key, const char* payload) {
+    Serial.println("NIP04 event");
+    // broadcase nip4 to lora
+    String serialisedMessage = String(payload);
+    broadcastNostrEvent(&serialisedMessage, NULL, "NOSTR_SUB_KIND_4");
+}
+
 void setup()
 {
     initBoard();
 
-    WiFi.begin(ssid, password);
-
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
+    initWiFi();
 
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
@@ -89,8 +97,8 @@ void setup()
     bootMillis = millis();
 
     const char *const relays[] = {
-        "relay.damus.io",
-        "nostr.mom",
+        // "relay.damus.io",
+        // "nostr.mom",
         "relay.nostr.bg"
     };
     int relayCount = sizeof(relays) / sizeof(relays[0]);
@@ -102,6 +110,7 @@ void setup()
     // Set some event specific callbacks here
     nostrRelayManager.setEventCallback("ok", okEvent);
     nostrRelayManager.setEventCallback("nip01", nip01Event);
+    nostrRelayManager.setEventCallback("nip04", nip04Event);
     nostrRelayManager.connect();
 
     // When the power is turned on, a delay is required.
@@ -182,36 +191,37 @@ std::map<int, String> receivedMessageMap;
 uint8_t totalParts = 0;
 uint8_t lastPartNum = 0;
 
+// a vector for storing node pubkeys
+std::vector<String> nodePubkeys;
+
 void loop()
 {
     broadcastTimestampOnLoRa();
     // try to parse packet
     int packetSize = LoRa.parsePacket();
     if (packetSize) {
-        lastReceiveTime = millis();
-        // received a packet
-        Serial.print("Received packet '");
+      lastReceiveTime = millis();
+      // received a packet
+      Serial.print("Received packet '");
 
-        String recv = "";
-        // read packet
-        while (LoRa.available()) {
-            recv += (char)LoRa.read();
-        }
+      String recv = "";
+      // read packet
+      while (LoRa.available()) {
+          recv += (char)LoRa.read();
+      }
 
-        Serial.println(recv);
+      Serial.println(recv);
 
-        // the recv package will be a base64 encoded dynamicjson array, base64 decode and deserialise the json
-        String decoded = base64Decode(recv);
-        Serial.println("Decoded: " + decoded);
-        DynamicJsonDocument doc(1024);
-        deserializeJson(doc, decoded);
+      // the recv package will be a base64 encoded dynamicjson array, base64 decode and deserialise the json
+      String decoded = base64Decode(recv);
+      Serial.println("Decoded: " + decoded);
+      DynamicJsonDocument doc(1024);
+      deserializeJson(doc, decoded);
+
+      if(doc["type"] == "NOSTR_NOTE_TX_REQ") {
+        
         // now, set the receivedMessageMap element to the decoded json messagePart using currentPart index
         int currentPart = doc["currentPart"];
-
-        // if(lastPartNum > 0 && currentPart != lastPartNum + 1) {
-        //     Serial.println("Missing part, clearing map");
-        //     receivedMessageMap.clear();
-        // }
 
         lastPartNum = currentPart;
 
@@ -225,15 +235,6 @@ void loop()
         receivedMessageMap[currentPart - 1] = doc["messagePart"].as<String>(); // currentPart - 1 to make it 0 indexed for storage in the map
         // destroy the doc
         doc.clear();
-
-        // print RSSI of packet
-        // Serial.print("' with RSSI ");
-        // Serial.println(LoRa.packetRssi());
-
-        // long timestamp = getUnixTimestamp();
-        // String note = nostr.getNote(nsecHex, npubHex, timestamp, recv.c_str());
-        // Serial.println("Sending note to nostr" + note);
-        // nostrRelayManager.enqueueMessage(note.c_str());
 
         // use the doc for the ACK message
         doc["type"] = "ACK";
@@ -252,21 +253,6 @@ void loop()
         LoRa.beginPacket();
         LoRa.print(encodedMessage.c_str());
         LoRa.endPacket();
-
-#ifdef HAS_DISPLAY
-        if (u8g2) {
-            u8g2->clearBuffer();
-            char buf[256];
-            u8g2->drawStr(0, 10, "Received OK!");
-            u8g2->drawStr(0, 20, recv.c_str());
-            snprintf(buf, sizeof(buf), "RSSI:%i", LoRa.packetRssi());
-            u8g2->drawStr(0, 30, buf);
-            snprintf(buf, sizeof(buf), "SNR:%.1f", LoRa.packetSnr());
-            u8g2->drawStr(0, 40, buf);
-            u8g2->sendBuffer();
-        }
-#endif
-
 
         Serial.println("Total parts: " + String(totalParts));
         // check if we have all the parts
@@ -294,8 +280,104 @@ void loop()
         Serial.println("Decoded message: " + decodedMessage);
         // send it over nostr
         nostrRelayManager.enqueueMessage(decodedMessage.c_str());
+      }
+      else if(doc["type"] == "PUBKEY") {
+          // if doc["content"] exists in nodePubkeys, do nothing, otherwise add it then subscribe to kind 4
+          // messages for the pubkey
+          String pubkey = doc["content"].as<String>();
+          if(std::find(nodePubkeys.begin(), nodePubkeys.end(), pubkey) != nodePubkeys.end()) {
+              // do nothing
+          } else {
+              Serial.println("New pubkey received: " + pubkey + " subscribing to kind 4 messages");
+              // add the pubkey to the nodePubkeys vector
+              nodePubkeys.push_back(pubkey);
+              // subscribe to kind 4 messages for the pubkey
+              NostrRequestOptions* eventRequestOptions = new NostrRequestOptions();
+
+              // Populate kinds
+              int kinds[] = {4};
+              eventRequestOptions->kinds = kinds;
+              eventRequestOptions->kinds_count = sizeof(kinds) / sizeof(kinds[0]);
+
+              // Populate #p
+              String p[] = {pubkey};
+              eventRequestOptions->p = p;
+              eventRequestOptions->p_count = sizeof(p) / sizeof(p[0]);
+
+              // Populate other fields
+              eventRequestOptions->since = getTimestampUsingBootMillis();
+              eventRequestOptions->limit = 1;
+              nostrRelayManager.requestEvents(eventRequestOptions);
+              delete eventRequestOptions;
+          }
+      }
     }
 
   nostrRelayManager.loop();
   nostrRelayManager.broadcastEvents();
+}
+
+
+void initWiFi() {
+  configureAccessPoint();
+    
+  WiFi.mode(WIFI_STA);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(3000);
+  }
+}
+
+/**
+ * @brief Configure the WiFi AP
+ * 
+ */
+void configureAccessPoint() {
+  // handle access point traffic
+  server.on("/", []() {
+    String content = "<h1>Gerty</br>Your Bitcoin Assistant</h1>";
+    content += AUTOCONNECT_LINK(COG_24);
+    server.send(200, "text/html", content);
+  });
+
+  config.autoReconnect = true;
+  config.reconnectInterval = 1; // 30s
+  config.beginTimeout = 30000UL;
+
+  config.hostName = "NostrLoRaMeshReceiver";
+  config.apid = "NostrLoRaMeshReceiver-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  config.apip = IPAddress(6, 15, 6, 15);      // Sets SoftAP IP address
+  config.gateway = IPAddress(6, 15, 6, 15);     // Sets WLAN router IP address
+  config.psk = apPassword;
+  config.menuItems = AC_MENUITEM_CONFIGNEW | AC_MENUITEM_OPENSSIDS | AC_MENUITEM_RESET;
+  config.title = "NostrLoRaMeshReceiver";
+  config.portalTimeout = 120000;
+
+  portal.whileCaptivePortal(whileCP);
+
+  portal.join({});
+  portal.config(config);
+
+    // Establish a connection with an autoReconnect option.
+  if (portal.begin()) {
+    Serial.println("WiFi connected: " + WiFi.localIP().toString());
+  }
+}
+
+/**
+ * @brief While captive portal callback
+ * 
+ * @return true 
+ * @return false 
+ */
+bool whileCP(void) {
+// u8g2 screeen show in CP mode
+#ifdef HAS_DISPLAY
+    if (u8g2) {
+        u8g2->clearBuffer();
+        u8g2->drawStr(0, 10, "AP config mode");
+        u8g2->drawStr(0, 20, WiFi.softAPIP().toString().c_str());
+        u8g2->sendBuffer();
+    }
+#endif
+  return true;
 }

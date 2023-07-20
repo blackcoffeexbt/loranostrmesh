@@ -5,6 +5,10 @@
 #include <NostrEvent.h>
 #include "helpers.h"
 #include "loranostrmesh.h"
+// autoconnect
+#include <WiFi.h>
+#include <WiFiMulti.h>
+
 
 #define RX_QUEUE_SIZE 1024
 
@@ -53,6 +57,12 @@ void setup()
 
 }
 
+String lastTimeUpdate = "";
+
+std::map<int, String> receivedMessageMap;
+uint8_t totalParts = 0;
+uint8_t lastPartNum = 0;
+
 void loraReceive() {
     // try to parse packet
     int packetSize = LoRa.parsePacket();
@@ -67,7 +77,7 @@ void loraReceive() {
         String decodedRecv = base64Decode(recv);
         Serial.println("Received packet " + decodedRecv);
         // deserialize the packet
-        DynamicJsonDocument doc(222);
+        DynamicJsonDocument doc(1024);
 
         decodeLoraPackage(&recv, &doc);
 
@@ -82,16 +92,77 @@ void loraReceive() {
         } else if(doc["type"] == "ACK") {
             // do nothing
             Serial.println("Received ACK");
-        } else if(doc["type"] == "NOSTR_EVENT") {
-            if(doc["event"] == "OK") {
-                logToSerialAndBT("Received Nostr OK event");
-                logToSerialAndBT("Content: " + doc["content"].as<String>());
-                oledDisplay("Received Nostr event: OK");
-            } else {
-                logToSerialAndBT("Received Nostr event");
-                logToSerialAndBT("Content: " + doc["content"].as<String>());
-                oledDisplay("Received Nostr event: Other");
+        } else if(doc["type"] == "NOSTR_OK_EVENT") {
+            logToSerialAndBT("Received Nostr OK event");
+            logToSerialAndBT("Content: " + doc["content"].as<String>());
+            oledDisplay("Received Nostr relay event: OK");
+        } else if(doc["type"] == "NOSTR_SUB_KIND_4") {
+            logToSerialAndBT("Received Nostr note" + doc["messagePart"].as<String>());
+            oledDisplay("Received DM.");
+            // Enter  the ack loop to receive the dm
+            // now, set the receivedMessageMap element to the decoded json messagePart using currentPart index
+            int currentPart = doc["currentPart"];
+            String checksum = doc["checksum"].as<String>();
+            Serial.println("Checksum is " + checksum);
+
+            lastPartNum = currentPart;
+
+            // if current part is less than the last part, clear the map ready for a new message
+            if (currentPart < lastPartNum) {
+                receivedMessageMap.clear();
             }
+
+            // Serial.println("doc[\"checksum\"] is " + doc["checksum"]);
+            totalParts = doc["totalParts"];
+            receivedMessageMap[currentPart - 1] = doc["messagePart"].as<String>(); // currentPart - 1 to make it 0 indexed for storage in the map
+            // destroy the doc
+            doc.clear();
+
+            // use the doc for the ACK message
+            doc["type"] = "ACK";
+            doc["currentPart"] = currentPart;
+            doc["totalParts"] = totalParts;
+            doc["checksum"] = checksum;
+
+            // serialise and base64 encode the doc
+            String serialisedMessage = "";
+            serializeJson(doc, serialisedMessage);
+            Serial.println("Serialised ACK message: " + serialisedMessage);
+            doc.clear();
+            String encodedMessage = base64Encode(serialisedMessage);
+
+            // send the ACK
+            LoRa.beginPacket();
+            LoRa.print(encodedMessage.c_str());
+            LoRa.endPacket();
+
+            Serial.println("Total parts: " + String(totalParts));
+            // check if we have all the parts
+            if (totalParts > 0 && currentPart < totalParts) {
+                Serial.println("Not all parts received yet, waiting for more");
+                return;
+            }
+
+            Serial.println("All parts received, joining message");
+            // join all the parts together
+            String joinedMessage = "";
+            for (int i = 0; i < receivedMessageMap.size(); i++) {
+                joinedMessage += receivedMessageMap[i];
+            }
+            Serial.println("Joined message: " + joinedMessage);
+
+            // clear the receivedMessageMap and reset counters
+            receivedMessageMap.clear();
+            totalParts = 0;
+            currentPart = 0;
+            lastPartNum = 0;
+
+            // base64 decode the joined message
+            String decodedMessage = base64Decode(joinedMessage);
+            Serial.println("Decoded message: " + decodedMessage);
+            String decryptedDm = nostr.decryptDm(nsecHex, decodedMessage);
+            logToSerialAndBT("Decrypted DM: " + decryptedDm);
+            
         } else {
             Serial.println("Received unknown type " + doc["type"].as<String>());
         }
@@ -144,6 +215,31 @@ void handleBluetooth() {
     logToSerialAndBT("Packet sent");
 }
 
+long lastPubKeyBroadcast = 0;
+/**
+ * @brief broadcast this node's public key to the network so IGNs will subscribe to events for this node
+ * 
+ */
+void broadcastPubKey() {
+    // every 30 seconds, broadcast pubkey
+    if(lastPubKeyBroadcast == 0 || millis() - lastPubKeyBroadcast > 30000) {
+        logToSerialAndBT("Broadcasting pubkey");
+        lastPubKeyBroadcast = millis();
+        // create json doc with type PUBKEY, content is the pubkey
+        DynamicJsonDocument doc(222);
+        doc["type"] = "PUBKEY";
+        doc["content"] = npubHex;
+        // encode the package for transmission
+        String loraPackage = "";
+        encodeLoraPackage(&doc, &loraPackage);
+        // broadcast the package
+        LoRa.beginPacket();
+        Serial.println("Sending packet " + loraPackage);
+        LoRa.print(loraPackage);
+        LoRa.endPacket();
+    }
+}
+
 
 void loop()
 {
@@ -159,4 +255,5 @@ void loop()
 
     loraReceive();
     handleBluetooth();
+    broadcastPubKey();
 }

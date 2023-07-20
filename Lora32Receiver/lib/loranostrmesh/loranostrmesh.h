@@ -2,7 +2,7 @@
 #include <string>
 #include <Base64.hpp>
 
-#define LORA_MAX_PACKET_SIZE 100
+#define LORA_MAX_PACKET_SIZE 80
 
 void split_string_into_parts(std::string* source, size_t part_length, std::vector<std::string>* result) {
     // Make sure source and result are not null
@@ -62,7 +62,7 @@ const int RETRY_TIME = 3000; // 10 seconds
  * @param serialisedEvent A serialised Nostr event JSON
  * @param callback A callback function to call when the ACK is received
  */
-void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDocument*)) {
+void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDocument*), String type = "NOSTR_NOTE_TX_REQ") {
 
     std::string base64EncodedEvent = base64Encode(*serialisedEvent).c_str();
     
@@ -78,6 +78,7 @@ void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDo
         // create a DynamicJson document with items: numParts, currentPart, messagePart, checksum
         Serial.println("Part " + String(i) + " of " + String(totalParts) + " with checksum " + checksum.c_str());
         DynamicJsonDocument doc(222);
+        doc["type"] = type;
         doc["totalParts"] = totalParts;
         doc["currentPart"] = i + 1; // 1 indexed
         doc["messagePart"] = messageParts.at(i);
