@@ -106,6 +106,8 @@ void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDo
             unsigned long startTime = millis();
             unsigned long currentTime = millis();
 
+            DynamicJsonDocument recvDoc(222);
+
             // Loop for 10 seconds or until ACK is received
             while (currentTime - startTime < RETRY_TIME) {
                 // Wait for a response
@@ -121,7 +123,7 @@ void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDo
                     String decodedRecv = base64Decode(recv);
                     Serial.println("Received packet " + decodedRecv);
                     // Deserialize the packet
-                    DynamicJsonDocument recvDoc(222);
+                    recvDoc.clear();
                     deserializeJson(recvDoc, decodedRecv);
                     // Check if the checksum matches
                     if (recvDoc["type"] == "ACK" && recvDoc["checksum"] == checksum) {
@@ -131,7 +133,6 @@ void broadcastNostrEvent(String* serialisedEvent, void (*callback)(DynamicJsonDo
                         }
                         // If it does, break out of the while
                         retryCount = MAX_RETRIES; // Break out of the outer retry loop
-                        recvDoc.clear();
                         break; // Break out of the inner while
                     }
                 }
